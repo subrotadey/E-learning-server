@@ -20,7 +20,6 @@ const client = new MongoClient(uri, {
 });
 
 function verifyJWT(req, res, next) {
-  // console.log('token inside verifyJWT', req.headers.authorization);
   const authHeader = req.headers.authorization;
   if (!authHeader) {
     return res.status(401).send("unauthorized access");
@@ -39,15 +38,73 @@ function verifyJWT(req, res, next) {
 async function run() {
   try {
     const courseCollection = client.db("onlineEdulogy").collection("courses");
-    const bookingsCollection = client
-      .db("onlineEdulogy")
-      .collection("bookings");
+    const bookingsCollection = client.db("onlineEdulogy").collection("bookings");
     const usersCollection = client.db("onlineEdulogy").collection("users");
+    const teachersCollection = client.db("onlineEdulogy").collection("teachers");
 
+
+    // Note: verifyAdmin  After verifyJWT
+    const verifyAdmin = (req, res, next) => {
+      console.log('inside verify', req.decoded.email);
+      next();
+    }
+
+    /////////////////////////////////////////////////////////////////////////////
+    // Course
+    //----------------------------------------------------------------------------
+    // Get all course
     app.get("/courses", async (req, res) => {
       const query = {};
       const course = await courseCollection.find(query).toArray();
       res.send(course);
+    });
+
+    // Get a single Course
+    app.get("/courses/:id", async(req, res) => {
+      const id = req.params.id;
+      const query = { _id:new ObjectId(id) };
+      const result = await courseCollection.findOne(query);
+      res.send(result);
+    })
+
+    //Add a Course
+    app.post("/courses", async(req, res) =>{
+      const newCourse = req.body;
+      const result = await courseCollection.insertOne(newCourse);
+      res.send(result);
+    })
+
+    //update Course
+    app.put("/courses/:id", async (req, res) => {
+      const id = req.params.id;
+      const updatedCourse = req.body;
+      const filter = { _id:new ObjectId(id) };
+      const options = { upsert: true };
+      const updatedDoc = {
+        $set: {
+          heading: updatedCourse.heading,
+          price: updatedCourse.price,
+          weeks: updatedCourse.weeks,
+          level: updatedCourse.level,
+          lesson: updatedCourse.lesson,
+          quiz: updatedCourse.quiz,
+          student: updatedCourse.student,
+        },
+      };
+      const result = await courseCollection.updateOne(
+        filter,
+        updatedDoc,
+        options
+      );
+      res.send(result);
+    });
+
+    //Delete a course
+    app.delete("/courses/:id", async (req, res) => {
+      const id = req.params.id;
+      const query = { _id:new ObjectId(id) };
+      const result = await courseCollection.deleteOne(query);
+      res.send(result);
     });
 
     /*
@@ -126,7 +183,6 @@ async function run() {
       if (user?.role !== "admin") {
         return res.status(403).send({ message: "forbidden access" });
       }
-
       const id = req.params.id;
       const filter = { _id: new ObjectId(id) };
       const options = { upsert: true };
@@ -142,6 +198,39 @@ async function run() {
       );
       res.send(result);
     });
+
+
+    // --------------------------------------------Teachers API Convention------------------------------------------
+    app.get('/teachers',  async(req, res) => {
+      const query = {};
+      const teachers = await teachersCollection.find(query).toArray();
+      res.send(teachers);
+    })
+
+    // Get a single Course
+    app.get("/teachers/:id", async(req, res) => {
+      const id = req.params.id;
+      const query = { _id:new ObjectId(id) };
+      const result = await teachersCollection.findOne(query);
+      res.send(result);
+    })
+
+    //Insert a teacher
+    app.post('/teachers', verifyJWT, async(req, res) => {
+      const teacher = req.body;
+      const result = await teachersCollection.insertOne(teacher);
+      res.send(result);
+    })
+
+    //Delete a teacher
+    app.delete("/teachers/:id", verifyJWT, async (req, res) => {
+      const id = req.params.id;
+      const query = { _id:new ObjectId(id) };
+      const result = await teachersCollection.deleteOne(query);
+      res.send(result);
+    });
+
+
   } finally {
   }
 }
