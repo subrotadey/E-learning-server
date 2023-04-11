@@ -3,6 +3,7 @@ const cors = require("cors");
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 const jwt = require("jsonwebtoken");
 require("dotenv").config();
+const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
 const port = process.env.PORT || 5000;
 
 const app = express();
@@ -41,17 +42,21 @@ async function run() {
     const bookingsCollection = client.db("onlineEdulogy").collection("bookings");
     const usersCollection = client.db("onlineEdulogy").collection("users");
     const teachersCollection = client.db("onlineEdulogy").collection("teachers");
-
+    const paymentsCollection = client.db("onlineEdulogy").collection("payments");
 
     // Note: verifyAdmin  After verifyJWT
-    const verifyAdmin = (req, res, next) => {
-      console.log('inside verify', req.decoded.email);
+    const verifyAdmin = async (req, res, next) => {
+      const decodedEmail = req.decoded.email;
+      const query = { email: decodedEmail };
+      const user = await usersCollection.findOne(query);
+      if (user?.role !== "admin") {
+        return res.status(403).send({ message: "forbidden access" });
+      }
       next();
-    }
+    };
 
-    /////////////////////////////////////////////////////////////////////////////
-    // Course
-    //----------------------------------------------------------------------------
+    //==========================================================Courses API Convention===================================================================
+    //
     // Get all course
     app.get("/courses", async (req, res) => {
       const query = {};
@@ -60,25 +65,25 @@ async function run() {
     });
 
     // Get a single Course
-    app.get("/courses/:id", async(req, res) => {
+    app.get("/courses/:id", async (req, res) => {
       const id = req.params.id;
-      const query = { _id:new ObjectId(id) };
+      const query = { _id: new ObjectId(id) };
       const result = await courseCollection.findOne(query);
       res.send(result);
-    })
+    });
 
     //Add a Course
-    app.post("/courses", async(req, res) =>{
+    app.post("/courses", verifyJWT, verifyAdmin, async (req, res) => {
       const newCourse = req.body;
       const result = await courseCollection.insertOne(newCourse);
       res.send(result);
-    })
+    });
 
     //update Course
-    app.put("/courses/:id", async (req, res) => {
+    app.put("/courses/:id", verifyJWT, verifyAdmin, async (req, res) => {
       const id = req.params.id;
       const updatedCourse = req.body;
-      const filter = { _id:new ObjectId(id) };
+      const filter = { _id: new ObjectId(id) };
       const options = { upsert: true };
       const updatedDoc = {
         $set: {
@@ -100,13 +105,45 @@ async function run() {
     });
 
     //Delete a course
-    app.delete("/courses/:id", async (req, res) => {
+    app.delete("/courses/:id", verifyJWT, verifyAdmin, async (req, res) => {
       const id = req.params.id;
-      const query = { _id:new ObjectId(id) };
+      const query = { _id: new ObjectId(id) };
       const result = await courseCollection.deleteOne(query);
       res.send(result);
     });
 
+    // ------------------------------------------------Teachers API Convention----------------------------------------------------------
+    //Get all Teachers
+    app.get("/teachers", async (req, res) => {
+      const query = {};
+      const teachers = await teachersCollection.find(query).toArray();
+      res.send(teachers);
+    });
+
+    // Get a single Course
+    app.get("/teachers/:id", async (req, res) => {
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) };
+      const result = await teachersCollection.findOne(query);
+      res.send(result);
+    });
+
+    //Insert a teacher
+    app.post("/teachers", verifyJWT, verifyAdmin, async (req, res) => {
+      const teacher = req.body;
+      const result = await teachersCollection.insertOne(teacher);
+      res.send(result);
+    });
+
+    //Delete a teacher
+    app.delete("/teachers/:id", verifyJWT, verifyAdmin, async (req, res) => {
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) };
+      const result = await teachersCollection.deleteOne(query);
+      res.send(result);
+    });
+
+    //===============================================================Bookings API Convention==================================================
     /*
       API naming Convention
       app.get('bookings')
@@ -127,10 +164,18 @@ async function run() {
       res.send(bookings);
     });
 
+    // Get a single booking
+    app.get("/bookings/:id", async (req, res) => {
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) };
+      const result = await bookingsCollection.findOne(query);
+      res.send(result);
+    });
+
     app.post("/bookings", async (req, res) => {
       const booking = req.body;
       const query = {
-        courseName: booking.courseName && booking.email,
+        courseName: booking.courseName,
       };
       const alreadyBooked = await bookingsCollection.find(query).toArray();
 
@@ -142,6 +187,44 @@ async function run() {
       const result = await bookingsCollection.insertOne(booking);
       res.send(result);
     });
+
+    app.post("/create-payment-intent", async (req, res) => {
+      const booking = req.body;
+      const price = booking.price;
+      const amount = price * 100;
+
+      const paymentIntent = await stripe.paymentIntents.create({
+        currency: "usd",
+        amount: amount,
+        payment_method_types: ["card"],
+      });
+      res.send({
+        clientSecret: paymentIntent.client_secret,
+      });
+    });
+
+    /*
+=========================================================Payments=====================================================================
+    */
+    app.post("/payments", async (req, res) => {
+      const payment = req.body;
+      const result = await paymentsCollection.insertOne(payment);
+      const id = payment.bookingId;
+      const filter = { _id: new ObjectId(id) };
+      const updatedDoc = {
+        $set: {
+          paid: true,
+          transactionId: payment.transactionId,
+        },
+      };
+      const updatedResult = await bookingsCollection.updateOne(
+        filter,
+        updatedDoc
+      );
+      res.send(result);
+    });
+
+    // ========================================================JWT Token==================================================================
 
     app.get("/jwt", async (req, res) => {
       const email = req.query.email;
@@ -156,6 +239,8 @@ async function run() {
       console.log(user);
       res.status(403).send({ accessToken: "" });
     });
+
+    //========================================================= User API Convention==========================================================
 
     app.get("/users", async (req, res) => {
       const query = {};
@@ -176,13 +261,7 @@ async function run() {
       res.send(result);
     });
 
-    app.put("/users/admin/:id", verifyJWT, async (req, res) => {
-      const decodedEmail = req.decoded.email;
-      const query = { email: decodedEmail };
-      const user = await usersCollection.findOne(query);
-      if (user?.role !== "admin") {
-        return res.status(403).send({ message: "forbidden access" });
-      }
+    app.put("/users/admin/:id", verifyJWT, verifyAdmin, async (req, res) => {
       const id = req.params.id;
       const filter = { _id: new ObjectId(id) };
       const options = { upsert: true };
@@ -199,38 +278,19 @@ async function run() {
       res.send(result);
     });
 
+    //----------------------------------------temporary to update price field on booking------------------------------------------------------
 
-    // --------------------------------------------Teachers API Convention------------------------------------------
-    app.get('/teachers',  async(req, res) => {
-      const query = {};
-      const teachers = await teachersCollection.find(query).toArray();
-      res.send(teachers);
-    })
-
-    // Get a single Course
-    app.get("/teachers/:id", async(req, res) => {
-      const id = req.params.id;
-      const query = { _id:new ObjectId(id) };
-      const result = await teachersCollection.findOne(query);
-      res.send(result);
-    })
-
-    //Insert a teacher
-    app.post('/teachers', verifyJWT, async(req, res) => {
-      const teacher = req.body;
-      const result = await teachersCollection.insertOne(teacher);
-      res.send(result);
-    })
-
-    //Delete a teacher
-    app.delete("/teachers/:id", verifyJWT, async (req, res) => {
-      const id = req.params.id;
-      const query = { _id:new ObjectId(id) };
-      const result = await teachersCollection.deleteOne(query);
-      res.send(result);
-    });
-
-
+    // app.get('/addPrice', async(req, res) => {
+    //   const filter = {}
+    //   const options = { upsert: true };
+    //   const updatedDoc = {
+    //     $set: {
+    //       price: 89,
+    //     },
+    //   };
+    //   const result = await bookingsCollection.updateMany(filter, updatedDoc, options);
+    //   res.send(result);
+    // })
   } finally {
   }
 }
