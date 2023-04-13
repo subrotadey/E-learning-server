@@ -174,8 +174,12 @@ async function run() {
 
     app.post("/bookings", async (req, res) => {
       const booking = req.body;
+      const email = req.query.email; // extra
+      const query1 = { email: email }; // extra
+      const user = await usersCollection.findOne(query1); // extra
       const query = {
         courseName: booking.courseName,
+        email:  email == query1 // extra
       };
       const alreadyBooked = await bookingsCollection.find(query).toArray();
 
