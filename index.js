@@ -39,10 +39,15 @@ function verifyJWT(req, res, next) {
 async function run() {
   try {
     const courseCollection = client.db("onlineEdulogy").collection("courses");
-    const bookingsCollection = client.db("onlineEdulogy").collection("bookings");
+    const bookingsCollection = client
+      .db("onlineEdulogy")
+      .collection("bookings");
     const usersCollection = client.db("onlineEdulogy").collection("users");
-    const teachersCollection = client.db("onlineEdulogy").collection("teachers");
+    const teachersCollection = client
+      .db("onlineEdulogy")
+      .collection("teachers");
     const paymentsCollection = client.db("onlineEdulogy").collection("payments");
+    const booksCollection = client.db("onlineEdulogy").collection("books");
 
     // Note: verifyAdmin  After verifyJWT
     const verifyAdmin = async (req, res, next) => {
@@ -59,9 +64,13 @@ async function run() {
     //
     // Get all course
     app.get("/courses", async (req, res) => {
+      const page = parseInt(req.query.page);
+      const size = parseInt(req.query.size);
+      console.log(page, size);
       const query = {};
-      const course = await courseCollection.find(query).toArray();
-      res.send(course);
+      const courses = await courseCollection.find(query).skip(page*size).limit(size).toArray();
+      const count = await courseCollection.estimatedDocumentCount();
+      res.send({count , courses});
     });
 
     // Get a single Course
@@ -80,7 +89,7 @@ async function run() {
     });
 
     //update Course
-    app.put("/courses/:id", verifyJWT, verifyAdmin, async (req, res) => {
+    app.put("/courses/:id", async (req, res) => {
       const id = req.params.id;
       const updatedCourse = req.body;
       const filter = { _id: new ObjectId(id) };
@@ -88,6 +97,7 @@ async function run() {
       const updatedDoc = {
         $set: {
           heading: updatedCourse.heading,
+          img: updatedCourse.img,
           price: updatedCourse.price,
           weeks: updatedCourse.weeks,
           level: updatedCourse.level,
@@ -135,11 +145,60 @@ async function run() {
       res.send(result);
     });
 
+    //Update teacher
+    app.put("/teachers/:id", async (req, res) => {
+      const id = req.params.id;
+      const updatedTeacher = req.body;
+      const filter = { _id: new ObjectId(id) };
+      const options = { upsert: true };
+      const updatedDoc = {
+        $set: {
+          first_name: updatedTeacher.first_name,
+          last_name: updatedTeacher.last_name,
+          img_link: updatedTeacher.img_link,
+          email: updatedTeacher.email,
+          designation: updatedTeacher.designation,
+          description: updatedTeacher.description,
+        },
+      };
+      const result = await teachersCollection.updateOne(
+        filter,
+        updatedDoc,
+        options
+      );
+      res.send(result);
+    });
+
     //Delete a teacher
     app.delete("/teachers/:id", verifyJWT, verifyAdmin, async (req, res) => {
       const id = req.params.id;
       const query = { _id: new ObjectId(id) };
       const result = await teachersCollection.deleteOne(query);
+      res.send(result);
+    });
+
+    // ============================================================ Books API Convention ==================================================
+    /*
+      API naming Convention
+      app.get('/books')
+      app.get('/books/id')
+      app.post('/books')
+      app.patch('/books/id')
+      app.delete('/books/id')
+    */
+
+    //Get all Books
+    app.get("/books", async (req, res) => {
+      const query = {};
+      const books = await booksCollection.find(query).toArray();
+      res.send(books);
+    });
+
+    // Get a single Books
+    app.get("/books/:id", async (req, res) => {
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) };
+      const result = await booksCollection.findOne(query);
       res.send(result);
     });
 
@@ -179,7 +238,7 @@ async function run() {
       const user = await usersCollection.findOne(query1); // extra
       const query = {
         courseName: booking.courseName,
-        email:  email == query1 // extra
+        email: email == query1, // extra
       };
       const alreadyBooked = await bookingsCollection.find(query).toArray();
 
@@ -262,6 +321,13 @@ async function run() {
     app.post("/users", async (req, res) => {
       const user = req.body;
       const result = await usersCollection.insertOne(user);
+      res.send(result);
+    });
+
+    app.delete("/users/:id", verifyJWT, verifyAdmin, async (req, res) => {
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) };
+      const result = await usersCollection.deleteOne(query);
       res.send(result);
     });
 
