@@ -39,6 +39,7 @@ function verifyJWT(req, res, next) {
 async function run() {
   try {
     const courseCollection = client.db("onlineEdulogy").collection("courses");
+    const reviewsCollection = client.db("onlineEdulogy").collection("reviews");
     const bookingsCollection = client
       .db("onlineEdulogy")
       .collection("bookings");
@@ -68,9 +69,9 @@ async function run() {
       const size = parseInt(req.query.size);
       console.log(page, size);
       const query = {};
-      const courses = await courseCollection.find(query).skip(page*size).limit(size).toArray();
+      const courses = await courseCollection.find(query).skip(page * size).limit(size).toArray();
       const count = await courseCollection.estimatedDocumentCount();
-      res.send({count , courses});
+      res.send({ count, courses });
     });
 
     // Get a single Course
@@ -119,6 +120,52 @@ async function run() {
       const id = req.params.id;
       const query = { _id: new ObjectId(id) };
       const result = await courseCollection.deleteOne(query);
+      res.send(result);
+    });
+
+    // ------------------------------------------------Reviews API Convention----------------------------------------------------------
+    //Get all Reviews
+
+    app.get("/reviews/:courseId", async (req, res) => {
+      const courseId = req.params.courseId;
+      const query = { courseId };
+      const reviews = await reviewsCollection.find(query).toArray();
+      res.send(reviews);
+    });
+
+    app.get("/reviews/average/:courseId", async (req, res) => {
+      const courseId = req.params.courseId;
+      const pipeline = [
+        { $match: { courseId } },
+        {
+          $group: {
+            _id: null,
+            averageRating: { $avg: "$rating" },
+            totalReviews: { $sum: 1 },
+          },
+        },
+      ];
+      const result = await reviewsCollection.aggregate(pipeline).toArray();
+      res.send(result[0] || { averageRating: 0, totalReviews: 0 });
+    });
+
+    app.post("/reviews", async (req, res) => {
+      const review = req.body;
+      const result = await reviewsCollection.insertOne(review);
+      // console.log(result);
+      res.send(result);
+    })
+
+    app.delete("/reviews/:id", verifyJWT, verifyAdmin, async (req, res) => {
+      const id = req.params.id;
+
+      // Validate ObjectId before using it
+      if (!ObjectId.isValid(id)) {
+        return res.status(400).send({ error: "Invalid review ID" });
+      }
+
+      const query = { _id: new ObjectId(id) };
+      const result = await reviewsCollection.deleteOne(query);
       res.send(result);
     });
 
@@ -231,25 +278,32 @@ async function run() {
       res.send(result);
     });
 
+
+
     app.post("/bookings", async (req, res) => {
       const booking = req.body;
-      const email = req.query.email; // extra
-      const query1 = { email: email }; // extra
-      const user = await usersCollection.findOne(query1); // extra
-      const query = {
-        courseName: booking.courseName,
-        email: email == query1, // extra
-      };
-      const alreadyBooked = await bookingsCollection.find(query).toArray();
 
-      if (alreadyBooked.length) {
-        const message = `You are already booked ${booking.courseName} Course`;
-        return res.send({ acknowledged: false, message });
+      if (!booking.email || !booking.courseName) {
+        return res.status(400).send({ acknowledged: false, message: "Email and courseName are required" });
       }
 
+      // Check if the user already booked this particular course
+      const query = {
+        email: booking.email,
+        courseName: booking.courseName,
+      };
+
+      const alreadyBooked = await bookingsCollection.findOne(query);
+
+      if (alreadyBooked) {
+        return res.send({ acknowledged: false, message: `You are already enrolled in the course: ${booking.courseName}` });
+      }
+
+      // If not already booked, insert booking
       const result = await bookingsCollection.insertOne(booking);
-      res.send(result);
+      res.send({ acknowledged: true, message: "Booking successful", bookingId: result.insertedId });
     });
+
 
     app.post("/create-payment-intent", async (req, res) => {
       const booking = req.body;
