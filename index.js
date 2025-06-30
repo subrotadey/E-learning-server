@@ -47,6 +47,10 @@ async function run() {
     const teachersCollection = client
       .db("onlineEdulogy")
       .collection("teachers");
+    // Instructors collection
+    // Note: Instructors are teachers who are not admin and can create courses.
+    const instructorRequestCollection = client.db("onlineEdulogy").collection("instructor-requests");
+    // Payments collection
     const paymentsCollection = client.db("onlineEdulogy").collection("payments");
     const booksCollection = client.db("onlineEdulogy").collection("books");
 
@@ -224,6 +228,49 @@ async function run() {
       res.send(result);
     });
 
+    // ============================================================ Instructors API Convention ==================================================
+
+    app.post("/instructor-requests", verifyJWT, async (req, res) => {
+      const instructor = req.body;
+      const query = { email: instructor.email };
+      const existingInstructor = await instructorRequestCollection.findOne(query);
+      if (existingInstructor) {
+        return res.status(400).send({ message: "You are already instructor" });
+      }
+      const result = await instructorRequestCollection.insertOne(instructor);
+      res.send(result);
+      console.log(result);
+    });
+
+    app.get("/instructor-requests", verifyJWT, verifyAdmin, async (req, res) => {
+      const query = {};
+      const instructors = await instructorRequestCollection.find(query).toArray();
+      res.send(instructors);
+    });
+
+    app.delete("/instructor-requests/:id", verifyJWT, verifyAdmin, async (req, res) => {
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) };
+      const result = await instructorRequestCollection.deleteOne(query);
+      res.send(result);
+    });
+
+    // Update instructor request status
+    // Default status is "approved" if not provided in the request body
+    app.put("/instructor-requests/:id", async (req, res) => {
+      const id = req.params.id;
+      const status = req.body.status || "approved";
+      console.log(`Updating instructor request ${id} with status: ${status}`);
+      const filter = { _id: new ObjectId(id) };
+      const updatedDoc = { $set: { status } };
+      const result = await instructorRequestCollection.updateOne(filter, updatedDoc);
+      console.log("Update result:", result);
+      res.send(result);
+    });
+
+
+
+
     // ============================================================ Books API Convention ==================================================
     /*
       API naming Convention
@@ -365,12 +412,13 @@ async function run() {
       res.send(users);
     });
 
-    app.get("/users/admin/:email", async (req, res) => {
+    app.get("/users/role/:email", async (req, res) => {
       const email = req.params.email;
-      const query = { email };
-      const user = await usersCollection.findOne(query);
-      res.send({ isAdmin: user?.role === "admin" });
+      const user = await usersCollection.findOne({ email });
+      res.send({ role: user?.role || "user" }); // default "user" if not set
     });
+
+
 
     app.post("/users", async (req, res) => {
       const user = req.body;
