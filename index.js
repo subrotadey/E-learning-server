@@ -352,6 +352,34 @@ async function run() {
     });
 
 
+    // ✅ Total enrollments per course (for chart)
+    app.get("/enroll-stats", async (req, res) => {
+      try {
+        const result = await bookingsCollection.aggregate([
+          { $match: { paid: true } },
+          {
+            $group: {
+              _id: "$courseName",
+              students: { $sum: 1 }
+            }
+          },
+          {
+            $project: {
+              _id: 0,
+              course: "$_id",
+              students: 1
+            }
+          }
+        ]).toArray();
+
+        res.send(result);
+      } catch (error) {
+        console.error("Error fetching enrollment stats:", error);
+        res.status(500).send({ message: "Internal Server Error" });
+      }
+    });
+
+    
     app.post("/create-payment-intent", async (req, res) => {
       const booking = req.body;
       const price = booking.price;
